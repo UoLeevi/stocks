@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using stocks.Hubs;
 
@@ -43,6 +44,11 @@ namespace stocks
             IApplicationBuilder app,
             IHostingEnvironment env)
         {
+            app.UseForwardedHeaders(
+                new ForwardedHeadersOptions
+                {
+                    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+                });
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
@@ -53,7 +59,6 @@ namespace stocks
                 app.UseCors("AllowLocalhost");
                 //app.UseCors("AllowKpiApp");
             }
-
             app.UseSignalR(routes => routes.MapHub<StocksHub>("/hubs/stocks"));
         }
     }
