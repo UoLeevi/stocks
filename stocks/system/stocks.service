@@ -1,0 +1,15 @@
+[Unit]
+Description=ASP.NET Core App for stocks.app running on Ubuntu
+
+[Service]
+WorkingDirectory=/var/aspnetcore/stocks-app
+ExecStart=/usr/bin/dotnet /var/aspnetcore/stocks-app/stocks.dll
+Restart=always
+RestartSec=10
+SyslogIdentifier=dotnet-stocks
+User=www-data
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+
+[Install]
+WantedBy=multi-user.target
