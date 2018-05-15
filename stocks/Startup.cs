@@ -50,7 +50,8 @@ namespace stocks
             }
             else
             {
-                app.UseCors("AllowKpiApp");
+                app.UseCors("AllowLocalhost");
+                //app.UseCors("AllowKpiApp");
             }
 
             app.UseSignalR(routes => routes.MapHub<StocksHub>("/hubs/stocks"));
