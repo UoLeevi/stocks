@@ -28,7 +28,6 @@ namespace stocks
                     builder => builder
                         .AllowAnyMethod()
                         .AllowAnyHeader()
-                        .WithOrigins("http://localhost")
                         .SetIsOriginAllowed(origin 
                             => origin == "http://localhost"
                             || origin.StartsWith("http://localhost:"))
