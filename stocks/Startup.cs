@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using stocks.Hubs;
 
@@ -33,6 +34,18 @@ namespace stocks
                             => origin == "http://localhost"
                             || origin.StartsWith("http://localhost:"))
                         .AllowCredentials());
+
+                options.AddPolicy(
+                    "AllowLocalhostAndKpiApp",
+                    builder => builder
+                        .AllowAnyMethod()
+                        .AllowAnyHeader()
+                        .SetIsOriginAllowed(origin
+                            => origin == "http://localhost"
+                            || origin.StartsWith("http://localhost:")
+                            || origin == "https://kpi.app"
+                            || origin.StartsWith("https://") && origin.EndsWith(".kpi.app"))
+                        .AllowCredentials());
             });
 
             services.AddSignalR();
@@ -42,7 +55,8 @@ namespace stocks
         // Use this method to configure the HTTP request pipeline.
         public void Configure(
             IApplicationBuilder app,
-            IHostingEnvironment env)
+            IHostingEnvironment env,
+            IHubContext<StocksHub> context)
         {
             app.UseForwardedHeaders(
                 new ForwardedHeadersOptions
@@ -56,10 +70,16 @@ namespace stocks
             }
             else
             {
-                app.UseCors("AllowLocalhost");
+                app.UseCors("AllowLocalhostAndKpiApp");
                 //app.UseCors("AllowKpiApp");
             }
             app.UseSignalR(routes => routes.MapHub<StocksHub>("/hubs/stocks"));
+
+            StocksHub.ReceiveIntradayQuotesJson += 
+                (tickerSymbol, intradayQuotesJson) => context.Clients.Group(tickerSymbol).SendAsync(
+                    nameof(StocksHub.ReceiveIntradayQuotesJson),
+                    tickerSymbol,
+                    intradayQuotesJson);
         }
     }
 }
