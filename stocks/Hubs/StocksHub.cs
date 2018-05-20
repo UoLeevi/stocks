@@ -1,33 +1,22 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
+using stocks.Models;
+using stocks.Models.Translators.AlphaVantage;
 
 namespace stocks.Hubs
 {
+    // TODO
+    // use cancellationTokens
     public class StocksHub : Hub
     {
-        public async Task SubscribeCallerToIntradayQuotes(
-            params string[] tickerSymbols) 
-            => await tickerSymbols
-                .ToAsyncEnumerable()
-                .OfType<string>()
-                .Select(t => t.Trim().ToUpperInvariant())
-                .Where(t => intradayQuotesJsonByTickerSymbol.TryGetValue(t, out _))
-                .ForEachAsync(async t =>
-                {
-                    addIntradayQuoteSubscription(t, Context.ConnectionId);
-                    await Groups.AddToGroupAsync(Context.ConnectionId, t);
-
-                    if (intradayQuotesJsonByTickerSymbol[t] is string)
-                        await Clients.Caller.SendAsync(nameof(ReceiveIntradayQuotesJson), t, intradayQuotesJsonByTickerSymbol[t]);
-                    else
-                        ReceiveIntradayQuotesJson?.Invoke(t, intradayQuotesJsonByTickerSymbol[t] = await getIntradayQuotesJsonAsync(t));
-                });
         public override async Task OnConnectedAsync()
         {
             await base.OnConnectedAsync();
@@ -40,9 +29,38 @@ namespace stocks.Hubs
                 .Keys
                 .ToAsyncEnumerable()
                 .ForEachAsync(async t => await Groups.RemoveFromGroupAsync(Context.ConnectionId, t));
-            await removeIntradayQuoteSubscriptionsForConnection(Context.ConnectionId);
+            await removeAllIntradayQuoteSubscriptionsForConnection(Context.ConnectionId);
             await base.OnDisconnectedAsync(exception);
         }
+        public async Task SubscribeCallerToQuotes(
+        params string[] tickerSymbols)
+        => await tickerSymbols
+            .ToAsyncEnumerable()
+            .OfType<string>()
+            .Select(t => (Instrument)t)
+            .Where(t => intradayQuotesJsonByTickerSymbol.TryGetValue(t, out _))
+            .ForEachAsync(async t =>
+            {
+                addQuotesSubscription(t, Context.ConnectionId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, t);
+
+                if (quotesByInstrument.TryGetValue(t, out ImmutableSortedSet<Quote> quotes))
+                    await Clients.Caller.SendAsync(nameof(ReceiveQuotes), t, quotes.ToArray());
+                else
+                    await updateAndSendIntradayQuotes(t);
+            });
+        public async Task UnsubscribeCallerFromIntradayQuotes(
+            params string[] tickerSymbols)
+            => await tickerSymbols
+                .ToAsyncEnumerable()
+                .OfType<string>()
+                .Select(t => t.Trim().ToUpperInvariant())
+                .Where(t => intradayQuotesJsonByTickerSymbol.TryGetValue(t, out _))
+                .ForEachAsync(t => removeIntradayQuoteSubscription(t, Context.ConnectionId));
+        public async Task SendSupportedTickerSymbolsToCaller()
+            => await Clients.Caller.SendAsync(
+                "ReceiveSupportedTickerSymbols",
+                intradayQuotesJsonByTickerSymbol.Keys.ToArray());
 
         static readonly HttpClient httpClient
             = new HttpClient();
@@ -50,11 +68,14 @@ namespace stocks.Hubs
             = new ConcurrentDictionary<string, string>(
                 new Dictionary<string, string>
                 {
-                            { "AAPL" , default },
-                            { "MSFT" , default },
-                            { "TSLA" , default },
-                            { "TWTR" , default }
+                    { "AAPL" , default },
+                    { "MSFT" , default },
+                    { "TSLA" , default },
+                    { "TWTR" , default }
                 });
+
+        static readonly IDictionary<Instrument, ImmutableSortedSet<Quote>> quotesByInstrument
+            = new ConcurrentDictionary<Instrument, ImmutableSortedSet<Quote>>();
 
         static readonly IDictionary<string, IDictionary<string, byte>> intradayQuoteSubscriptionsByTickerSymbol
             = new ConcurrentDictionary<string, IDictionary<string, byte>>();
@@ -63,9 +84,9 @@ namespace stocks.Hubs
         {
             const int requestIntervalInSeconds = 60;
 
-            ManualResetEventSlim finishCurrentTasksWaitHandle = new ManualResetEventSlim();
-            CancellationTokenSource updateIntradayQuotesCts = new CancellationTokenSource();
-            CancellationToken updateIntradayQuotesCt = updateIntradayQuotesCts.Token;
+            ManualResetEventSlim mre = new ManualResetEventSlim();
+            CancellationTokenSource cts = new CancellationTokenSource();
+            CancellationToken ct = cts.Token;
             AppDomain.CurrentDomain.ProcessExit += (s, e) => finishUpdatingIntradayQuotes();
             new Thread(updateIntradayData)
             {
@@ -74,37 +95,42 @@ namespace stocks.Hubs
 
             void updateIntradayData()
             {
-                while (!updateIntradayQuotesCt
+                while (!ct
                     .WaitHandle
                     .WaitOne(TimeSpan.FromSeconds(requestIntervalInSeconds)))
                     getTickerSymbolsWithIntradayQuoteSubscriptions()
-                        .ForEach(async tickerSymbol
-                            => ReceiveIntradayQuotesJson?.Invoke(
-                                tickerSymbol,
-                                intradayQuotesJsonByTickerSymbol[tickerSymbol] = await getIntradayQuotesJsonAsync(tickerSymbol)));
+                        .ForEach(async symbol => await updateAndSendIntradayQuotes(symbol));
 
-                finishCurrentTasksWaitHandle.Set();
+                mre.Set();
 
             }
             void finishUpdatingIntradayQuotes()
             {
-                updateIntradayQuotesCts.Cancel();
-                finishCurrentTasksWaitHandle.Wait();
+                cts.Cancel();
+                mre.Wait();
                 httpClient.Dispose();
             }
         }
 
         public static event Action<string, string> ReceiveIntradayQuotesJson;
+        public static event Action<Instrument, ISet<Quote>> ReceiveQuotes;
 
-        private static void addIntradayQuoteSubscription(
+        private static void addQuotesSubscription(
             string tickerSymbol,
             string connectionId)
         {
             intradayQuoteSubscriptionsByTickerSymbol.TryAdd(tickerSymbol, new ConcurrentDictionary<string, byte>());
             intradayQuoteSubscriptionsByTickerSymbol[tickerSymbol].TryAdd(connectionId, default);
         }
-        private static async Task removeIntradayQuoteSubscriptionsForConnection(
-            string connectionId) 
+        private static void removeIntradayQuoteSubscription(
+            string tickerSymbol,
+            string connectionId)
+        {
+            if (intradayQuoteSubscriptionsByTickerSymbol.TryGetValue(tickerSymbol, out IDictionary<string, byte> subscriptionsForTickerSymbol))
+                subscriptionsForTickerSymbol.Remove(connectionId);
+        }
+        private static async Task removeAllIntradayQuoteSubscriptionsForConnection(
+            string connectionId)
             => await intradayQuoteSubscriptionsByTickerSymbol
                 .Values
                 .ToAsyncEnumerable()
@@ -123,6 +149,52 @@ namespace stocks.Hubs
                 $"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={tickerSymbol}&interval=1min&apikey=4UJU16PLBC0WSPDB"))
             using (HttpContent content = response.Content)
                 return await content.ReadAsStringAsync();
+        }
+        private static async Task<string> getIntradayQuotesCsvAsync(
+            string tickerSymbol)
+        {
+            using (HttpResponseMessage response = await httpClient.GetAsync(
+                $"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={tickerSymbol}&interval=1min&apikey=4UJU16PLBC0WSPDB&datatype=csv"))
+            using (HttpContent content = response.Content)
+                return await content.ReadAsStringAsync();
+        }
+
+        private static async Task updateAndSendIntradayQuotes(
+            string symbol)
+        {
+            string csv = await getIntradayQuotesCsvAsync(symbol);
+
+            ImmutableSortedSet<Quote> requestQuotes = new IntradayQuoteCsvTranslator()
+                .ToQuotes(csv)
+                .ToImmutableSortedSet();
+
+            int i = requestQuotes.Count;
+
+            if (quotesByInstrument.TryGetValue(symbol, out ImmutableSortedSet<Quote> quotes) &&
+                !quotes.IsEmpty &&
+                quotes[quotes.Count - 1].Time is DateTime lastUpdate)
+            {
+                SortedSet<Quote> newQuotes = new SortedSet<Quote>();
+
+                while (requestQuotes[--i].Time > lastUpdate)
+                    newQuotes.Add(requestQuotes[i]);
+
+                if (newQuotes.Count > 0)
+                {
+                    ImmutableSortedSet<Quote>.Builder quoteAdder = quotes.ToBuilder();
+
+                    foreach (Quote quote in newQuotes)
+                        quoteAdder.Add(quote);
+
+                    quotesByInstrument[symbol] = quoteAdder.ToImmutable();
+                    ReceiveQuotes?.Invoke(symbol, newQuotes);
+                }
+            }
+            else
+            {
+                quotesByInstrument.Add(symbol, requestQuotes);
+                ReceiveQuotes?.Invoke(symbol, requestQuotes);
+            }
         }
     }
 }

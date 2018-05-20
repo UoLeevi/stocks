@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using System.Linq;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
@@ -80,6 +81,12 @@ namespace stocks
                     nameof(StocksHub.ReceiveIntradayQuotesJson),
                     tickerSymbol,
                     intradayQuotesJson);
+
+            StocksHub.ReceiveQuotes +=
+                (tickerSymbol, quotes) => context.Clients.Group(tickerSymbol).SendAsync(
+                    nameof(StocksHub.ReceiveQuotes),
+                    tickerSymbol,
+                    quotes.ToArray());
         }
     }
 }
