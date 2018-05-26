@@ -71,10 +71,21 @@ namespace stocks.Hubs
             = new ConcurrentDictionary<string, string>(
                 new Dictionary<string, string>
                 {
-                    { "AAPL" , default },
-                    { "MSFT" , default },
-                    { "TSLA" , default },
-                    { "TWTR" , default }
+                    { "AAPL",  default },
+                    { "ADBE",  default },
+                    { "AMZN",  default },
+                    { "BKNG",  default },
+                    { "CMCSA", default },
+                    { "CSCO",  default },
+                    { "FB",    default },
+                    { "GOOG",  default },
+                    { "GOOGL", default },
+                    { "INTC",  default },
+                    { "MSFT",  default },
+                    { "NFLX",  default },
+                    { "NVDA",  default },
+                    { "TSLA",  default },
+                    { "TWTR",  default }
                 });
 
         static readonly IDictionary<Instrument, ImmutableSortedSet<Quote>> quotesByInstrument
