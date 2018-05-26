@@ -10,6 +10,7 @@ SyslogIdentifier=dotnet-stocks
 User=www-data
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+Environment=API_KEYS=/var/aspnetcore/apikeys/apiKeys.json
 
 [Install]
 WantedBy=multi-user.target

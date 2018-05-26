@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using stocks.Hubs;
 
@@ -57,6 +58,7 @@ namespace stocks
         public void Configure(
             IApplicationBuilder app,
             IHostingEnvironment env,
+            IConfiguration config,
             IHubContext<StocksHub> context)
         {
             app.UseForwardedHeaders(
@@ -75,6 +77,8 @@ namespace stocks
                 //app.UseCors("AllowKpiApp");
             }
             app.UseSignalR(routes => routes.MapHub<StocksHub>("/hubs/stocks"));
+
+            StocksHub.Start(config["apiKeys:AlphaVantage"]);
 
             StocksHub.ReceiveIntradayQuotesJson += 
                 (tickerSymbol, intradayQuotesJson) => context.Clients.Group(tickerSymbol).SendAsync(

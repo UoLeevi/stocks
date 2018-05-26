@@ -62,6 +62,9 @@ namespace stocks.Hubs
                 "ReceiveSupportedTickerSymbols",
                 intradayQuotesJsonByTickerSymbol.Keys.ToArray());
 
+
+        static string apiKey;
+
         static readonly HttpClient httpClient
             = new HttpClient();
         static readonly IDictionary<string, string> intradayQuotesJsonByTickerSymbol
@@ -80,8 +83,11 @@ namespace stocks.Hubs
         static readonly IDictionary<string, IDictionary<string, byte>> intradayQuoteSubscriptionsByTickerSymbol
             = new ConcurrentDictionary<string, IDictionary<string, byte>>();
 
-        static StocksHub()
+        public static void Start(
+            string apiKey)
         {
+            StocksHub.apiKey = apiKey;
+
             const int requestIntervalInSeconds = 60;
 
             ManualResetEventSlim mre = new ManualResetEventSlim();
@@ -102,7 +108,6 @@ namespace stocks.Hubs
                         .ForEach(async symbol => await updateAndSendIntradayQuotes(symbol));
 
                 mre.Set();
-
             }
             void finishUpdatingIntradayQuotes()
             {
@@ -142,19 +147,11 @@ namespace stocks.Hubs
                 .Where(d => d.Value?.Any() is true)
                 .Select(d => d.Key);
 
-        private static async Task<string> getIntradayQuotesJsonAsync(
-            string tickerSymbol)
-        {
-            using (HttpResponseMessage response = await httpClient.GetAsync(
-                $"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={tickerSymbol}&interval=1min&apikey=4UJU16PLBC0WSPDB"))
-            using (HttpContent content = response.Content)
-                return await content.ReadAsStringAsync();
-        }
         private static async Task<string> getIntradayQuotesCsvAsync(
             string tickerSymbol)
         {
             using (HttpResponseMessage response = await httpClient.GetAsync(
-                $"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={tickerSymbol}&interval=1min&apikey=4UJU16PLBC0WSPDB&datatype=csv"))
+                $"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={tickerSymbol}&interval=1min&apikey={apiKey}&datatype=csv"))
             using (HttpContent content = response.Content)
                 return await content.ReadAsStringAsync();
         }
@@ -192,9 +189,10 @@ namespace stocks.Hubs
             }
             else
             {
-                quotesByInstrument.Add(symbol, requestQuotes);
+                quotesByInstrument[symbol] = requestQuotes;
                 ReceiveQuotes?.Invoke(symbol, requestQuotes);
             }
         }
+            
     }
 }

@@ -10,7 +10,13 @@ namespace stocks
             string[] args)
         {
             IConfigurationRoot config = new ConfigurationBuilder()
+                .AddEnvironmentVariables()
                 .AddCommandLine(args)
+                .Build();
+
+            config = new ConfigurationBuilder()
+                .AddJsonFile(config["API_KEYS"])
+                .AddConfiguration(config)
                 .Build();
 
             IWebHost host = new WebHostBuilder()
